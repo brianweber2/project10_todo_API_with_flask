@@ -1,4 +1,6 @@
 import unittest
+import base64
+import json
 
 from playhouse.test_utils import test_database
 from peewee import *
@@ -83,6 +85,26 @@ class ViewTestCase(unittest.TestCase):
         self.app = app.test_client()
 
 
+class AppViewsTestCase(ViewTestCase):
+    def test_homepage_401(self):
+        rv = self.app.get('/')
+        self.assertEqual(rv.status_code, 401)
+
+    def test_homepage_200(self):
+        with test_database(TEST_DB, (User,)):
+            UserModelTestCase.create_users(1)
+            user = User.get(User.id==1)
+            basic_header = {
+                'Authorization': 'Basic ' + base64.b64encode(
+                    bytes(user.username + ':' + 'password', 'ascii')
+                ).decode('ascii')
+            }
+            rv = self.app.get('/api/v1/users/token', headers=basic_header)
+            self.assertEqual(rv.status_code, 200)
+
+            token = json.loads(rv.get_data(as_text=True))['token']
+
+
 class UserResourceTestCase(ViewTestCase):
     def test_create_user_resource(self):
         with test_database(TEST_DB, (User,)):
@@ -127,6 +149,11 @@ class TodoResourceTestCase(ViewTestCase):
             self.assertEqual(rv.status_code, 200)
             self.assertIn('Todo Number 1', rv.get_data(as_text=True))
 
+    def test_get_single_todo_fail(self):
+        rv = self.app.get('/api/v1/todos/1')
+        self.assertEqual(rv.status_code, 404)
+        self.assertRaises(Todo.DoesNotExist)
+
     def test_update_todo(self):
         with test_database(TEST_DB, (Todo,)):
             self.create_todos()
@@ -144,8 +171,22 @@ class TodoResourceTestCase(ViewTestCase):
 
 
 class AuthTestCase(ViewTestCase):
-    def test_get_auth_token(self):
-        pass
+    def test_get_auth_token_locked(self):
+        with test_database(TEST_DB, (User,)):
+            rv = self.app.get('/api/v1/users/token')
+            self.assertEqual(rv.status_code, 401)
+
+    def test_get_auth_token_200(self):
+        with test_database(TEST_DB, (User,)):
+            UserModelTestCase.create_users(1)
+            user = User.get(User.id==1)
+            headers={
+                'Authorization': 'Basic ' + base64.b64encode(
+                    bytes(user.username + ':' + 'password', 'ascii')
+                ).decode('ascii')
+            }
+            rv = self.app.get('/api/v1/users/token', headers=headers)
+            self.assertEqual(rv.status_code, 200)
 
 
 if __name__ == '__main__':
